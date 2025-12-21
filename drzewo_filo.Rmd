@@ -9,43 +9,32 @@ library(ggtree)
 library(ggplot2)
 library(apex)
 library(msa)
-library(stringr)
+library(stringr) 
+library(tidyverse)
 ```
 
 
 
-```{bash}
-#DOpasowanie dekwencji przy pomocy muscle
-source /home/janek/miniconda3/bin/activate 
-conda activate muscle
 
-muscle -align projekt_drzewo.fasta -output projekt_drzewo.afa
-
-conda deactivate
-```
 
 ```{r}
-#Read Fasta file
+#Wzytanie pliku fasta
 dna_raw <- readDNAStringSet("projekt_drzewo.fasta")
 
-#Make MMA usng muscle
+#MMa przy pomocy MUSCLE
 aln <- msa(dna_raw, method = "Muscle")
 
-#Save as phydat
+#Zapis jako phydat
 phydat <- as.phyDat(aln, type = "DNA")
 
-# Extract identifier (first token)
+# Lista Idnryfikator
 identifier <- str_extract(sequence_names, "^[^ ]+")
 
-# Extract organism (inside brackets)
-organism <- str_extract(sequence_names, "(?<=\\[).*?(?=\\])")
+# lista gatunków
+organism <- str_extract(sequence_names, "(?<=\\[Staphylococcus).*?(?=\\])")
 
-# Replace spaces with underscores in organism
-organism <- str_replace_all(organism, " ", "_")
-
-# Combine into new names
-new_names <- paste(identifier, organism, sep = "_")
-
+#nowe identyfikaotry
+new_names <- paste(identifier, organism, sep = " Staph.")
 
 names(phydat)<-new_names
 names(phydat)
@@ -53,31 +42,36 @@ names(phydat)
 
 
 
-
-
 ```{r}
+#Liczneie macierzy odległośći
 dist_matrix <- dist.ml(phydat)
+
+#Drzewo metodą NJ
 nj_tree <- NJ(dist_matrix)
 
-
+#utworzenie obiektu pml
 fit <- pml(nj_tree, data = phydat)
-
-fit_opt <- optim.pml(
-  fit,
-  model = "GTR",  
-  optInv = TRUE,
-  optGamma = TRUE,
-  rearrangement = "stochastic"
-)
 
 ```
 
 ```{r}
-set.seed(123)
+#Opytmalizacja drzewa przy użyciu GTR
+fit_opt <- optim.pml(
+  fit,
+  optInv = TRUE,
+  optGamma = TRUE,
+  model = "GTR",  
+  rearrangement = "stochastic"
+)
+```
 
+# BootStrap
+```{r}
+set.seed(123)
+#Liczeni bootstrap dla 1000
 bs <- bootstrap.pml(
   fit_opt,
-  bs = 100   # use 500–1000 for final analysis
+  bs = 1000
 )
 
 ```
@@ -94,42 +88,82 @@ tree_bs <- plotBS(
 
 
 ```{r}
-p <- ggtree(tree_bs, branch.length = "none") +
-  geom_tiplab(size = 3, offset = 0.5) +
-  geom_hilight(node=17, fill="gold") + 
-  geom_hilight(node=21, fill="purple")+
-  geom_text2(aes(label = label), size = 3, hjust = -0.1) +
-  scale_x_continuous(limits=c(0,40))+
+my_tab <- as_tibble(tree_bs)
+x <- my_tab %>%   mutate(TIP_COL = grepl("aureus", label, ignore.case = TRUE))
+x
+```
 
-  theme_tree2()
+```{r}
+my_tab <- as_tibble(tree_bs)
+x <- my_tab %>%   mutate(TIP_COL = grepl("aureus", label, ignore.case = TRUE))
+x
+
+#Rysowanie drzewa
+p <- ggtree(tree_bs, branch.length = "none") %<+% x +
+  geom_tiplab(size = 3, offset = 0.5) +
+  geom_nodelab(size=3, hjust = -0.1)+ #wartosći bootstrap
+  geom_tippoint(aes(color = TIP_COL), size = 3) +
+  scale_color_manual(
+    values = c( `TRUE` = "green")
+  ) +
+  scale_x_continuous(limits = c(0, 18)) + #skala limity
+  theme_tree2()+  #skala na dole
+  theme(legend.position = "none") 
 
 p
-
-```
-```{r}
-library(ggtree)
-
-p <- ggtree(tree_bs, branch.length = "none") +
-  geom_hilight(node = 17, fill = "gold", alpha = 0.3) +
-  geom_hilight(node = 21, fill = "purple", alpha = 0.3) +
-  geom_tiplab(size = 3, offset = 0.5) +
-  geom_text2(aes(label = label), size = 3, hjust = -0.1) +
-  xlim_tree(40) +
-  theme_tree2()
-
-p
-
-```
-
-
-```{r}
-# Check number of sites and sequences
-phydat
-```
-
-
-```{r}
 ggsave("phylogenetic_tree_bootstrap.png", p, width = 8, height = 8)
+```
+
+
+
+```{r}
+
+```
+
+
+```{r}
+library(DiagrammeR)
+```
+
+
+```{r}
+grViz("
+digraph workflow {
+  
+  # Ustawienia grafu
+  graph [layout = dot,
+         rankdir = TB,
+         fontsize = 10]
+         
+         
+
+  # Domyślne style węzłów (można nadpisać indywidualnie)
+  node [fontname=Helvetica, style=filled, fillcolor=LightGray]
+  
+
+  # Pliki (folder)
+  DB [label='DB', shape=folder, fillcolor=Beige]
+  UNIPROT [label='UNPROT', shape=folder, fillcolor=Beige]
+  FASTA1 [label='plik FASTA', shape=folder, fillcolor=Beige]
+  FASTA2 [label='plik FASTA', shape=folder, fillcolor=Beige]
+  
+
+  # Procesy (box)
+  BLAST [label='BLAST', shape=box, fillcolor=LightBlue]
+  MEGA [label='MEGA', shape=box, fillcolor=LightBlue]
+  AF2 [label='AF2', shape=box, fillcolor=LightBlue]
+  chimera [label='Chimera', shape=box, fillcolor=LightBlue]
+  
+  # Krawędzie (workflow)
+  DB -> FASTA1
+  DB -> BLAST
+  UNIPROT -> FASTA1
+  FASTA1 -> BLAST
+  BLAST -> FASTA2
+  FASTA2 -> AF2
+  FASTA2 -> chimera
+}
+")
 ```
 
 
